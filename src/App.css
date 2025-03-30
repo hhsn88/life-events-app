@@ -1,3 +1,6 @@
+/* === Add this import at the very top === */
+@import url('https://fonts.googleapis.com/css2?family=Caveat&display=swap');
+
 /* General Styles */
 body {
   margin: 0;
@@ -34,7 +37,7 @@ body {
 .header {
   display: flex;
   flex-wrap: wrap; /* Allow wrapping on small screens */
-  justify-content: space-between;
+  /* Removed justify-content: space-between; */
   align-items: center;
   gap: 15px; /* Space between title and controls */
   margin-bottom: 20px;
@@ -44,21 +47,28 @@ body {
 
 .header h1 {
   margin: 0;
-  font-size: 1.8em;
-  color: #4a5568; /* Darker gray */
-  flex-grow: 1; /* Allow title to take space */
+  /* Apply new font and center */
+  font-family: 'Caveat', cursive;
+  font-size: 2.5em; /* Make fun font larger */
+  color: #3b5998; /* Example color */
+  text-align: center;
+  flex-grow: 1; /* Allow title to take available space */
+  /* Add some padding if needed */
+  padding: 0 10px;
 }
 
 .auth-controls {
   display: flex;
   align-items: center;
-  flex-shrink: 0; /* Prevent controls from shrinking too much */
+  flex-shrink: 0;
+  /* Push controls to the right if header is flex */
+  margin-left: auto;
 }
 
 .user-info {
   display: flex;
   align-items: center;
-  gap: 10px; /* Space between name and button */
+  gap: 10px; /* Space between email and button */
   flex-wrap: wrap; /* Allow wrapping */
 }
 
@@ -70,10 +80,10 @@ body {
 
 /* Buttons */
 .button {
-  padding: 8px 12px; /* Slightly smaller padding */
+  padding: 8px 12px;
   border: none;
   border-radius: 5px;
-  font-size: 0.95em; /* Slightly smaller font */
+  font-size: 0.95em;
   cursor: pointer;
   transition: background-color 0.2s ease, opacity 0.2s ease;
   text-align: center;
@@ -120,28 +130,47 @@ body {
     font-size: 1.2em;
     cursor: pointer;
     color: #555;
-    line-height: 1; /* Ensure consistent height */
+    line-height: 1;
 }
 .button-icon:hover:not(:disabled) {
     color: #000;
 }
 
-/* New Delete Button Style */
 .button-delete {
   background-color: transparent;
   border: none;
   color: #cc0000;
-  font-size: 1.4em; /* Make X larger */
+  font-size: 1.4em;
   font-weight: bold;
-  padding: 0 5px; /* Minimal padding */
+  padding: 0 5px;
   cursor: pointer;
-  line-height: 1; /* Align X better */
-  margin-left: 10px; /* Space from content */
-  flex-shrink: 0; /* Prevent button from shrinking */
+  line-height: 1;
+  margin-left: 10px;
+  flex-shrink: 0;
 }
 
 .button-delete:hover:not(:disabled) {
   color: #ff0000;
+}
+
+.button-small {
+    padding: 5px 10px;
+    font-size: 0.85em;
+}
+
+/* New style for the "Change" ID button */
+.button-change-id {
+  background-color: transparent;
+  color: #4285f4; /* Google Blue */
+  border: none;
+  /* padding: 5px 10px; Match button-small */
+  /* font-size: 0.85em; Match button-small */
+  text-decoration: none; /* Remove underline */
+  font-weight: 500;
+}
+.button-change-id:hover:not(:disabled) {
+  background-color: #e8f0fe; /* Light hover */
+  text-decoration: underline;
 }
 
 
@@ -163,9 +192,9 @@ body {
 
 .form-row {
   display: flex;
-  flex-wrap: wrap; /* Allow wrapping */
-  gap: 10px; /* Space between elements in a row */
-  align-items: center; /* Align items vertically */
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
   margin-bottom: 10px;
 }
 
@@ -180,7 +209,7 @@ body {
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 1em;
-  box-sizing: border-box; /* Include padding in width */
+  box-sizing: border-box;
 }
 
 .select-field {
@@ -192,9 +221,9 @@ body {
    padding-right: 30px;
 }
 
-/* Make input in form-row take available space */
 .form-row .input-field {
     flex-grow: 1;
+    min-width: 200px;
 }
 
 .form-actions {
@@ -217,7 +246,7 @@ body {
 
 .section-header {
   display: flex;
-  flex-wrap: wrap; /* Allow wrapping */
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
@@ -238,12 +267,52 @@ body {
   align-items: center;
 }
 
+/* Spreadsheet ID Section */
+.spreadsheet-id-section {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #e8f0fe; /* Light blue background */
+  border: 1px solid #d2e3fc;
+  border-radius: 5px;
+}
+
+.spreadsheet-id-display {
+  display: flex;
+  flex-wrap: wrap; /* Allow wrap */
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px; /* Adjust gap */
+}
+
+.spreadsheet-id-display span {
+    flex-grow: 1; /* Allow text to take space */
+    word-break: break-word;
+    margin-right: 10px; /* Add space before button */
+}
+
+.spreadsheet-id-display code {
+  background-color: #fff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.spreadsheet-id-form label {
+    margin-bottom: 8px;
+}
+
+.spreadsheet-id-form .form-row {
+    margin-bottom: 5px; /* Reduce margin below input row */
+}
+
+
 /* Event List */
 .event-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  max-height: 400px; /* Limit height and allow scrolling */
+  max-height: 400px;
   overflow-y: auto;
   border: 1px solid #e0e0e0;
   border-radius: 5px;
@@ -251,12 +320,12 @@ body {
 
 .event-item {
   background-color: #fff;
-  padding: 10px 15px; /* Adjust padding */
+  padding: 10px 15px;
   border-bottom: 1px solid #eee;
-  display: flex; /* Use flexbox to align content and button */
-  justify-content: space-between; /* Push button to the right */
-  align-items: center; /* Vertically align items */
-  gap: 10px; /* Add gap between content and button */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
 }
 
 .event-item:last-child {
@@ -264,15 +333,14 @@ body {
 }
 
 .event-content {
-    flex-grow: 1; /* Allow content to take available space */
-    /* Removed margin-right, using gap in parent */
-    min-width: 0; /* Allow content to shrink if needed */
+    flex-grow: 1;
+    min-width: 0;
 }
 
 .event-description {
   margin: 0 0 5px 0;
   font-weight: 500;
-  word-break: break-word; /* Prevent long descriptions overflowing */
+  word-break: break-word;
 }
 
 .event-timestamp {
@@ -287,20 +355,20 @@ body {
   color: #666;
   margin-top: 20px;
   font-style: italic;
+  padding: 10px;
 }
 
 .loader {
   font-size: 1em;
   color: #555;
   margin-right: 10px;
-  /* Add animation if desired */
 }
 
 /* Error Box */
 .error-box {
-  background-color: #fdecea; /* Light red */
-  border: 1px solid #f5c6cb; /* Red border */
-  color: #721c24; /* Dark red text */
+  background-color: #fdecea;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
   padding: 15px;
   border-radius: 5px;
   margin-bottom: 20px;
