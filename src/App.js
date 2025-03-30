@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css'; // Import the CSS file
+import logo from './logo.svg'; // Import the SVG logo from src
 
 // --- Configuration ---
 // Read Client ID and API Key from environment variables
@@ -94,10 +95,9 @@ function App() {
       try {
           const response = await window.gapi.client.people.people.get({ resourceName: 'people/me', personFields: 'names,emailAddresses' });
           const profile = response.result;
-          // Keep name for potential future use, but won't display it
           const primaryName = profile.names?.find(n => n.metadata?.primary)?.displayName ?? (profile.names?.length > 0 ? profile.names[0].displayName : 'User');
           const primaryEmail = profile.emailAddresses?.find(e => e.metadata?.primary)?.value ?? (profile.emailAddresses?.length > 0 ? profile.emailAddresses[0].value : 'No email');
-          setCurrentUser({ name: primaryName, email: primaryEmail }); // Store both, display only email
+          setCurrentUser({ name: primaryName, email: primaryEmail });
           console.log("fetchUserProfile finished successfully.");
           return Promise.resolve();
       } catch (err) {
@@ -420,7 +420,7 @@ function App() {
       if (isSignedIn && isGapiReady && userSpreadsheetId) {
           console.log("isSignedIn, GAPI ready, and Spreadsheet ID available. Fetching initial data...");
           setIsLoading(true);
-          Promise.allSettled([fetchUserProfile(), fetchTopics(true, true)])
+          Promise.allSettled([fetchUserProfile(), fetchTopics(true, true)]) // Pass true for initial load, true for signedInStatus
               .then((results) => {
                   console.log("Initial fetchUserProfile/fetchTopics settled:", results);
                   results.forEach((result, index) => {
@@ -459,8 +459,12 @@ function App() {
       <div className="content-wrapper">
         {/* Header */}
         <header className="header">
-            {/* Updated Title */}
-            <h1>Life Events Tracker</h1>
+            {/* Updated Title with Icon */}
+            <h1>
+                {/* Use img tag for SVG */}
+                <img src={logo} alt="App logo" className="header-logo" />
+                Life Events Tracker
+            </h1>
             <div className="auth-controls">
                 {showAppLoading && <div className="loader">Loading...</div>}
                 {isGapiReady && isGisReady && !isSignedIn && !showAppLoading && ( <button onClick={handleAuthClick} disabled={showAppLoading} className="button button-primary"> Sign In with Google </button> )}
