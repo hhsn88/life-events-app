@@ -1,3 +1,7 @@
+# About
+
+This project is being vibe-coded with Gemini 2.5 Pro Exp (03-25).
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
