@@ -2,17 +2,17 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css'; // Import the CSS file
 
 // --- Configuration ---
-// Read from environment variables provided by Create React App
+// Read Client ID and API Key from environment variables
 const CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const API_KEY = process.env.REACT_APP_GOOGLE_API_KEY;
 const SPREADSHEET_ID = process.env.REACT_APP_GOOGLE_SPREADSHEET_ID;
 
-// *** Add console log to check loaded values ***
 console.log('Loaded Client ID:', CLIENT_ID ? 'Exists' : 'MISSING');
 console.log('Loaded API Key:', API_KEY ? 'Exists' : 'MISSING');
 console.log('Loaded Spreadsheet ID:', SPREADSHEET_ID || 'MISSING/UNDEFINED');
 
 const SCOPES = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
+const LOCAL_STORAGE_KEY = 'sheetsEventAppSpreadsheetId'; // Key for localStorage
 
 // --- Helper Functions ---
 function formatTimestamp(date = new Date()) {
@@ -42,14 +42,19 @@ function App() {
   const [newEventCustomTime, setNewEventCustomTime] = useState('');
   const [newEventData, setNewEventData] = useState({}); // Stores { headerName: value }
 
+  // State for configurable Spreadsheet ID
+  const [userSpreadsheetId, setUserSpreadsheetId] = useState(''); // Holds the active ID
+  const [spreadsheetIdInput, setSpreadsheetIdInput] = useState(''); // Temp state for the input field
+  const [showIdInput, setShowIdInput] = useState(false); // Control visibility of input UI
+
   const tokenClient = useRef(null);
   const isSilentSigninAttempt = useRef(false);
 
   // *** Add an initial check for essential config ***
   useEffect(() => {
     // Check only once on mount
-    if (!CLIENT_ID || !API_KEY || !SPREADSHEET_ID) {
-      setError("Configuration Error: Ensure REACT_APP_GOOGLE_CLIENT_ID, REACT_APP_GOOGLE_API_KEY, and REACT_APP_GOOGLE_SPREADSHEET_ID are set in your .env file and the server was restarted.");
+    if (!CLIENT_ID || !API_KEY) { // Removed SPREADSHEET_ID check here, handled by user input
+      setError("Configuration Error: Ensure REACT_APP_GOOGLE_CLIENT_ID and REACT_APP_GOOGLE_API_KEY are set in your .env file and the server was restarted.");
       setIsLoading(false);
       // Prevent further initialization if config is missing
       setIsGapiReady(false);
@@ -97,61 +102,40 @@ function App() {
           const primaryEmail = profile.emailAddresses?.find(e => e.metadata?.primary)?.value ?? (profile.emailAddresses?.length > 0 ? profile.emailAddresses[0].value : 'No email');
           setCurrentUser({ name: primaryName, email: primaryEmail });
           console.log("fetchUserProfile finished successfully.");
-          return Promise.resolve(); // Indicate success
+          return Promise.resolve();
       } catch (err) {
           console.error("Error fetching user profile:", err); const errorMsg = `Could not fetch profile: ${err.result?.error?.message || err.message}`; setError(errorMsg);
           if (err.status === 401 || err.status === 403) { console.warn("Auth error fetching profile, signing out.", err.status); setError(`Auth error fetching profile (${err.status}).`); handleSignOutClick(); }
           else { console.warn("Non-auth error fetching profile.", err.status); }
           console.log("fetchUserProfile finished with error.");
-          return Promise.reject(err); // Indicate failure
+          return Promise.reject(err);
       }
   }, [handleSignOutClick]);
 
-  // *** fetchTopics: Accepts signedInStatus argument, removed isSignedIn from deps ***
   const fetchTopics = useCallback(async (isInitialLoad = false, signedInStatus) => {
     console.log(`Attempting to fetch topics... (Signed-in status passed: ${signedInStatus})`);
-    if (!SPREADSHEET_ID) { setError("Spreadsheet ID is missing."); return Promise.reject("Spreadsheet ID missing"); }
-    // Use the passed argument for the check
-    if (!signedInStatus || !window.gapi?.client?.sheets) {
-        console.log(`Fetch topics skipped (Check failed: signedInStatus=${signedInStatus}, sheetsReady=${!!window.gapi?.client?.sheets}).`);
-        return Promise.resolve(); // Resolve silently if skipped
-    }
+    if (!userSpreadsheetId) { console.warn("Fetch topics skipped: Spreadsheet ID not set."); return Promise.resolve(); } // Resolve silently if ID not set
+    if (!signedInStatus || !window.gapi?.client?.sheets) { console.log(`Fetch topics skipped (Check failed: signedInStatus=${signedInStatus}, sheetsReady=${!!window.gapi?.client?.sheets}).`); return Promise.resolve(); }
 
     console.log("Fetching topics list...");
-    if (!isInitialLoad) setIsFetchingTopics(true); // Use specific loading state only for manual refresh
-    setError(null);
+    if (!isInitialLoad) setIsFetchingTopics(true); setError(null);
     try {
-      const response = await window.gapi.client.sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'sheets(properties(title,sheetId))' });
+      const response = await window.gapi.client.sheets.spreadsheets.get({ spreadsheetId: userSpreadsheetId, fields: 'sheets(properties(title,sheetId))' });
       const sheets = response.result.sheets || [];
       const topicData = sheets.map(sheet => ({ title: sheet.properties.title, sheetId: sheet.properties.sheetId }));
-      setTopics(topicData);
-      console.log("Topics fetched and state updated:", topicData);
-
-      // This logic might run before selectedTopic state from previous render is available,
-      // so we check against the current selectedTopic state directly.
+      setTopics(topicData); console.log("Topics fetched and state updated:", topicData);
       const currentSelectedTopicExists = topicData.some(t => t.title === selectedTopic);
-      if ((!currentSelectedTopicExists || !selectedTopic) && topicData.length > 0) {
-          console.log("Updating selected topic to first in list:", topicData[0].title);
-          setSelectedTopic(topicData[0].title);
-      } else if (topicData.length === 0) {
-          console.log("No topics found, clearing selection.");
-          setSelectedTopic('');
-      }
-      console.log("fetchTopics finished successfully.");
-      return Promise.resolve(); // Indicate success
+      if ((!currentSelectedTopicExists || !selectedTopic) && topicData.length > 0) { setSelectedTopic(topicData[0].title); }
+      else if (topicData.length === 0) { setSelectedTopic(''); }
+      console.log("fetchTopics finished successfully."); return Promise.resolve();
     } catch (err) {
       console.error("Error fetching topics:", err); const errorMsg = `Error fetching topics: ${err.result?.error?.message || err.message}.`; setError(errorMsg);
        if (err.status === 401 || err.status === 403) { console.warn("Auth error fetching topics, signing out.", err.status); setError("Auth error fetching topics."); handleSignOutClick(); }
-       else if (err.status === 404) { console.warn("Spreadsheet not found.", err.status); setError(`Spreadsheet not found.`); }
+       else if (err.status === 404) { console.warn("Spreadsheet not found.", err.status); setError(`Spreadsheet not found or permission denied. Check ID.`); }
        else { console.warn("Non-auth/404 error fetching topics.", err.status); }
-       console.log("fetchTopics finished with error.");
-       return Promise.reject(err); // Indicate failure
-    } finally {
-      if (!isInitialLoad) setIsFetchingTopics(false);
-      // Main isLoading is handled by the calling effect now for initial load
-    }
-  // Keep selectedTopic for internal logic, handleSignOutClick for error handling
-  }, [handleSignOutClick, selectedTopic]);
+       console.log("fetchTopics finished with error."); return Promise.reject(err);
+    } finally { if (!isInitialLoad) setIsFetchingTopics(false); }
+  }, [handleSignOutClick, selectedTopic, userSpreadsheetId]); // Depends on these
 
   // --- Google API Initialization Callbacks (Memoized) ---
   const initializeGapiClient = useCallback(async () => {
@@ -169,7 +153,7 @@ function App() {
     }
   }, []); // API_KEY is stable
 
-  // *** Updated GIS Client Initialization: Callback ONLY sets state ***
+  // *** Updated initializeGisClient: Enhanced callback logic ***
   const initializeGisClient = useCallback(() => {
     if (!CLIENT_ID) { console.error("Client ID missing"); return; }
     console.log("Initializing GIS client...");
@@ -178,29 +162,49 @@ function App() {
             client_id: CLIENT_ID, scope: SCOPES,
             callback: (tokenResponse) => {
                 console.log("GIS Token Callback received:", tokenResponse);
-                isSilentSigninAttempt.current = false;
+                const wasSilentAttempt = isSilentSigninAttempt.current; // Check flag before resetting
+                isSilentSigninAttempt.current = false; // Reset flag
+
+                // *** Explicitly check for error property in the response ***
+                if (tokenResponse.error) {
+                    console.error(`GIS Token Callback Error: ${tokenResponse.error}, Subtype: ${tokenResponse.error_subtype}, Desc: ${tokenResponse.error_description}`);
+                    // Treat as error, unless it was a silent attempt that requires interaction
+                    const silentInteractionRequired = wasSilentAttempt && (tokenResponse.error === 'interaction_required' || tokenResponse.error === 'access_denied');
+                    if (!silentInteractionRequired) {
+                        setError(`Google Sign-In Error: ${tokenResponse.error || 'Unknown error'}`);
+                    } else {
+                        console.log("Silent sign-in requires user interaction.");
+                    }
+                    setIsSignedIn(false);
+                    setIsLoading(false); // Ensure loading stops
+                    return; // Stop processing this callback
+                }
+
+                // Proceed if no error property and access token exists
                 if (tokenResponse && tokenResponse.access_token) {
                     console.log("GIS Token obtained successfully.");
                     window.gapi.client.setToken({ access_token: tokenResponse.access_token });
-                    // Set signed-in state. The useEffect depending on isSignedIn will fetch data.
-                    setIsSignedIn(true);
+                    setIsSignedIn(true); // Set state, useEffect will trigger fetches
                     console.log("Set isSignedIn = true.");
-                    // Data fetching is now handled by the useEffect watching isSignedIn
+                    // Do not set isLoading false here, let the useEffect handle it
                 } else {
-                    console.error("GIS Token response error or missing token:", tokenResponse);
-                    setError("Failed to obtain access token from Google.");
-                    setIsSignedIn(false); setIsLoading(false); // Stop loading on token error
+                    // This case should be less likely now with the error check above
+                    console.error("GIS Token response missing access token:", tokenResponse);
+                    setError("Failed to obtain access token from Google (unexpected response).");
+                    setIsSignedIn(false);
+                    setIsLoading(false); // Stop loading on unexpected token error
                 }
             },
-            error_callback: (error) => {
-                console.warn("GIS Token Client Error Object:", error);
+            error_callback: (error) => { // Handles other errors (e.g., network, config)
+                console.warn("GIS Token Client error_callback triggered:", error);
                 const wasSilentAttempt = isSilentSigninAttempt.current;
                 isSilentSigninAttempt.current = false;
                 const silentFailureTypes = ['popup_closed', 'immediate_failed', 'user_cancel', 'opt_out_or_no_session', 'suppressed_by_user'];
                 const isKnownSilentFailure = error.type && silentFailureTypes.includes(error.type);
-                const treatAsSilent = wasSilentAttempt && (isKnownSilentFailure || error.type === 'popup_failed_to_open');
-                if (treatAsSilent) { console.log(`Silent sign-in failed (Reason: ${error.type}).`); }
-                else { setError(`Google Sign-In Error: ${error.type || 'popup_failed_to_open'}`); }
+                const treatAsSilent = wasSilentAttempt && (isKnownSilentFailure || error.type === 'popup_failed_to_open'); // Still treat popup_failed_to_open as silent here
+
+                if (treatAsSilent) { console.log(`Silent sign-in failed via error_callback (Reason: ${error.type}).`); }
+                else { setError(`Google Sign-In Error: ${error.type || 'Unknown error'}`); }
                 setIsSignedIn(false); setIsLoading(false); // Stop loading on error
             }
         });
@@ -211,8 +215,7 @@ function App() {
         setError(`Error initializing Google Sign-In: ${err.message || JSON.stringify(err)}`);
         setIsGisReady(false); setIsLoading(false);
     }
-  // Removed fetchUserProfile, fetchTopics from dependencies
-  }, []);
+  }, []); // Dependencies stable
 
   const loadGapiScript = useCallback(() => {
     if (error?.startsWith("Configuration Error")) return null;
@@ -234,16 +237,173 @@ function App() {
     script.onload = () => { console.log("GIS script loaded."); if (window.google?.accounts?.oauth2) { initializeGisClient(); } else { setError("GIS script loaded but google.accounts.oauth2 not available."); } };
     script.onerror = () => setError("Failed to load Google Identity Services script.");
     document.body.appendChild(script); return script;
-  // initializeGisClient is stable, error dependency added
-  }, [initializeGisClient, error]);
+  }, [initializeGisClient, error]); // Depends on initializeGisClient
+
+  const fetchEvents = useCallback(async () => {
+    if (!userSpreadsheetId) { setError("Spreadsheet ID is not set."); return; }
+    console.log(`Attempting to fetch events for topic: ${selectedTopic}`);
+    if (!selectedTopic || !isSignedIn || !window.gapi?.client?.sheets) { console.log("Fetch events skipped."); setEvents([]); return; }
+    console.log(`Fetching events for topic: ${selectedTopic}`);
+    setIsFetchingEvents(true); setError(null);
+    try {
+      const range = `${selectedTopic}!A2:B`;
+      const response = await window.gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: userSpreadsheetId, range: range });
+      const values = response.result.values || [];
+      const loadedEvents = values.map((row, index) => ({ id: `${selectedTopic}-${index}`, timestamp: row[0] || '', description: row[1] || '', rowNum: index + 2 })).sort((a, b) => { const dateA = new Date(a.timestamp); const dateB = new Date(b.timestamp); if (isNaN(dateA)) return 1; if (isNaN(dateB)) return -1; return dateB - dateA; });
+      setEvents(loadedEvents);
+    } catch (err) {
+      console.error("Error fetching events:", err);
+       const errorMessage = err.result?.error?.message || '';
+       if (err.status === 400 && (errorMessage.includes('Unable to parse range') || errorMessage.includes('exceeds grid limits'))) { console.log(`Sheet "${selectedTopic}" is likely empty/new.`); setEvents([]); }
+       else { const errorMsg = `Error fetching events: ${errorMessage}`; setError(errorMsg); if (err.status === 401 || err.status === 403) { console.warn("Auth error fetching events.", err.status); setError("Auth error fetching events."); handleSignOutClick(); } else { console.warn("Non-auth/grid error fetching events.", err.status); } }
+    } finally { console.log("fetchEvents finished."); setIsFetchingEvents(false); }
+  }, [selectedTopic, isSignedIn, handleSignOutClick, userSpreadsheetId]);
+
+  const fetchTopicHeaders = useCallback(async (topicTitle) => {
+      if (!userSpreadsheetId) { setError("Spreadsheet ID is not set."); return; }
+      console.log(`Attempting to fetch headers for topic: ${topicTitle}`);
+      if (!topicTitle || !isSignedIn || !window.gapi?.client?.sheets) { console.log("Fetch headers skipped."); setCurrentTopicHeaders([]); return; }
+      console.log(`Fetching headers for topic: ${topicTitle}`);
+      setIsFetchingHeaders(true); setError(null);
+      try {
+          const range = `${topicTitle}!1:1`;
+          const response = await window.gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: userSpreadsheetId, range: range });
+          const headers = response.result.values?.[0] || [];
+          setCurrentTopicHeaders(headers);
+      } catch (err) {
+          console.error("Error fetching topic headers:", err); const errorMsg = `Error fetching headers: ${err.result?.error?.message || err.message}`; setError(errorMsg);
+          setCurrentTopicHeaders([]);
+          if (err.status === 401 || err.status === 403) { console.warn("Auth error fetching headers.", err.status); setError("Auth error fetching headers."); handleSignOutClick(); }
+          else { console.warn("Non-auth error fetching headers.", err.status); }
+      } finally { console.log("fetchTopicHeaders finished."); setIsFetchingHeaders(false); }
+  }, [isSignedIn, handleSignOutClick, userSpreadsheetId]);
 
 
-  // --- Effects ---
+  // --- Action Handlers (Memoized) ---
+  const handleAuthClick = useCallback(() => {
+    if (error?.startsWith("Configuration Error")) return;
+    console.log("handleAuthClick called");
+    setError(null);
+    if (!tokenClient.current) { setError("Google Sign-In is not ready yet."); setIsLoading(false); return; }
+    console.log("Requesting token access via GIS (with consent prompt)..."); setIsLoading(true);
+    isSilentSigninAttempt.current = false; // Explicit attempt
+    tokenClient.current.requestAccessToken({ prompt: 'consent' });
+  }, [error]);
+
+  const handleAddTopic = useCallback(async (e) => {
+    e.preventDefault(); if (!userSpreadsheetId) { setError("Spreadsheet ID is not set."); return; }
+    console.log("handleAddTopic called");
+    const trimmedTopicName = newTopicName.trim(); const trimmedColumns = newTopicColumns.trim();
+    if (!trimmedTopicName || !isSignedIn || !window.gapi?.client?.sheets) { setError("Topic name cannot be empty, or not signed in/ready."); return; }
+    if (topics.some(topic => topic.title === trimmedTopicName)) { setError(`Topic "${trimmedTopicName}" already exists.`); return; }
+    const userColumns = trimmedColumns ? trimmedColumns.split(',').map(col => col.trim()).filter(Boolean) : ['Event Description'];
+    const finalHeaders = ["Timestamp", ...userColumns]; const columnCount = finalHeaders.length;
+    console.log(`Adding topic: ${trimmedTopicName} with columns: ${finalHeaders.join(', ')}`);
+    setIsLoading(true); setError(null);
+    try {
+      const addSheetRequest = { requests: [ { addSheet: { properties: { title: trimmedTopicName, gridProperties: { rowCount: 1, columnCount: columnCount } } } } ] };
+      const response = await window.gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: userSpreadsheetId, resource: addSheetRequest });
+      const newSheetProperties = response.result.replies?.[0]?.addSheet?.properties; const newSheetId = newSheetProperties?.sheetId;
+      if (!newSheetId && newSheetId !== 0) { throw new Error("Could not get sheetId for new sheet."); }
+      await window.gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: userSpreadsheetId, range: `${trimmedTopicName}!A1`, valueInputOption: 'USER_ENTERED', resource: { values: [finalHeaders] } });
+      setNewTopicName(''); setNewTopicColumns('Event Description'); setShowAddTopic(false);
+      const newTopic = { title: trimmedTopicName, sheetId: newSheetId };
+      setTopics(prevTopics => [...prevTopics, newTopic]);
+      setSelectedTopic(trimmedTopicName);
+    } catch (err) {
+      console.error("Error adding topic:", err); const errorMsg = `Error adding topic: ${err.result?.error?.message || err.message}`; setError(errorMsg);
+      if (err.status === 401 || err.status === 403) { console.warn("Auth error adding topic.", err.status); setError("Auth error adding topic."); handleSignOutClick(); }
+      else { console.warn("Non-auth error adding topic.", err.status); }
+    } finally { console.log("handleAddTopic finished."); setIsLoading(false); }
+  }, [newTopicName, newTopicColumns, isSignedIn, topics, handleSignOutClick, userSpreadsheetId]);
+
+  const handleAddEvent = useCallback(async (e) => {
+    e.preventDefault(); if (!userSpreadsheetId) { setError("Spreadsheet ID is not set."); return; }
+    console.log("handleAddEvent called");
+    if (currentTopicHeaders.length === 0) { setError("Topic headers not loaded."); return; }
+    const hasDynamicData = Object.values(newEventData).some(val => val && val.trim() !== '');
+    const isTimestampOnly = currentTopicHeaders.length === 1;
+    if (!isTimestampOnly && !hasDynamicData) { setError(`Please fill in at least one event detail.`); return; }
+    if (!selectedTopic || !isSignedIn || !window.gapi?.client?.sheets) { setError("Cannot add event: Not ready."); return; }
+    console.log(`Adding event to topic: ${selectedTopic}`);
+    setIsLoading(true); setError(null);
+    try {
+      let timestamp = formatTimestamp(); const trimmedTime = newEventCustomTime.trim();
+      if (trimmedTime) {
+          if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmedTime)) { const parsedDate = new Date(trimmedTime); if (!isNaN(parsedDate.getTime())) { timestamp = formatTimestamp(parsedDate); } else { setError("Invalid custom date format."); setIsLoading(false); return; } }
+          else { setError("Invalid custom date format."); setIsLoading(false); return; }
+      }
+      const rowData = currentTopicHeaders.map((header, index) => (index === 0 ? timestamp : (newEventData[header] || '')));
+      const values = [rowData]; const body = { values: values };
+      await window.gapi.client.sheets.spreadsheets.values.append({ spreadsheetId: userSpreadsheetId, range: selectedTopic, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', resource: body });
+      setNewEventCustomTime(''); setNewEventData({}); setShowAddEvent(false);
+      await fetchEvents();
+    } catch (err) {
+      console.error("Error adding event:", err); const errorMsg = `Error adding event: ${err.result?.error?.message || err.message}`; setError(errorMsg);
+      if (err.status === 401 || err.status === 403) { console.warn("Auth error adding event.", err.status); setError("Auth error adding event."); handleSignOutClick(); }
+      else { console.warn("Non-auth error adding event.", err.status); }
+    } finally { console.log("handleAddEvent finished."); setIsLoading(false); }
+  }, [selectedTopic, isSignedIn, newEventCustomTime, fetchEvents, handleSignOutClick, currentTopicHeaders, newEventData, userSpreadsheetId]);
+
+  const handleDeleteEvent = useCallback(async (eventToDelete, sheetId) => {
+      if (!userSpreadsheetId) { setError("Spreadsheet ID is not set."); return; }
+      if (!eventToDelete || sheetId === undefined || !isSignedIn || !window.gapi?.client?.sheets) { setError("Cannot delete event: missing data/state."); return; }
+      if (!window.confirm(`Delete event: "${eventToDelete.description}"?`)) { return; }
+      console.log(`Deleting row: ${eventToDelete.rowNum} from sheetId: ${sheetId}`);
+      setIsLoading(true); setError(null);
+      try {
+          const deleteRequest = { requests: [ { deleteDimension: { range: { sheetId: sheetId, dimension: "ROWS", startIndex: eventToDelete.rowNum - 1, endIndex: eventToDelete.rowNum } } } ] };
+          await window.gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: userSpreadsheetId, resource: deleteRequest });
+          setEvents(prevEvents => prevEvents.filter(event => event.id !== eventToDelete.id));
+      } catch (err) {
+          console.error("Error deleting event:", err); const errorMsg = `Error deleting event: ${err.result?.error?.message || err.message}`; setError(errorMsg);
+          if (err.status === 401 || err.status === 403) { console.warn("Auth error deleting event.", err.status); setError("Auth error deleting event."); handleSignOutClick(); }
+          else { console.warn("Non-auth error deleting event.", err.status); }
+      } finally { console.log("handleDeleteEvent finished."); setIsLoading(false); }
+  }, [isSignedIn, handleSignOutClick, userSpreadsheetId]);
+
+  const handleNewEventDataChange = (header, value) => setNewEventData(prevData => ({ ...prevData, [header]: value }));
+
+  const handleSaveSpreadsheetId = () => {
+      const trimmedId = spreadsheetIdInput.trim();
+      if (trimmedId) {
+          console.log("Saving Spreadsheet ID:", trimmedId);
+          localStorage.setItem(LOCAL_STORAGE_KEY, trimmedId);
+          setUserSpreadsheetId(trimmedId);
+          setError(null); setShowIdInput(false);
+          if (isSignedIn) {
+              setTopics([]); setSelectedTopic(''); setEvents([]); setCurrentTopicHeaders([]);
+              fetchTopics(true, true); // Fetch topics for the new sheet ID
+          }
+      } else { setError("Please enter a valid Spreadsheet ID."); }
+  };
+
+  const handleChangeSpreadsheetId = () => {
+      setShowIdInput(true); setTopics([]); setSelectedTopic('');
+      setEvents([]); setCurrentTopicHeaders([]); setError(null);
+  };
+
+  // --- Helper to get sheetId (defined after topics state) ---
+  const getCurrentSheetId = () => topics.find(t => t.title === selectedTopic)?.sheetId;
+
+  // --- Effects (defined after all needed functions are defined) ---
+
   useEffect(() => { // Config Check Effect
-    if (!CLIENT_ID || !API_KEY || !SPREADSHEET_ID) {
-      setError("Configuration Error: Ensure REACT_APP_GOOGLE_CLIENT_ID, REACT_APP_GOOGLE_API_KEY, and REACT_APP_GOOGLE_SPREADSHEET_ID are set in your .env file and the server was restarted.");
+    if (!CLIENT_ID || !API_KEY) {
+      setError("Configuration Error: Ensure REACT_APP_GOOGLE_CLIENT_ID and REACT_APP_GOOGLE_API_KEY are set in your .env file and the server was restarted.");
       setIsLoading(false); setIsGapiReady(false); setIsGisReady(false);
     }
+  }, []);
+
+  useEffect(() => { // Load saved Spreadsheet ID
+      const savedId = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (savedId) {
+          console.log("Loaded Spreadsheet ID from localStorage:", savedId);
+          setUserSpreadsheetId(savedId); setSpreadsheetIdInput(savedId); setShowIdInput(false);
+      } else {
+          console.log("No Spreadsheet ID found in localStorage.");
+          setShowIdInput(true); setIsLoading(false);
+      }
   }, []);
 
   useEffect(() => { // Script Loading Effect
@@ -256,195 +416,67 @@ function App() {
       if (gapiScript?.parentNode) document.body.removeChild(gapiScript);
       if (gisScript?.parentNode) document.body.removeChild(gisScript);
     };
-  }, [loadGapiScript, loadGisScript, error]);
+  }, [loadGapiScript, loadGisScript, error]); // load functions are memoized
 
   useEffect(() => { // Silent Sign-in Attempt Effect
     if (error?.startsWith("Configuration Error") || !isGapiReady || !isGisReady) return;
     console.log(`Readiness effect: isGapiReady=${isGapiReady}, isGisReady=${isGisReady}`);
-    // Only attempt silent sign-in if NOT already signed in
     if (!isSignedIn) {
         console.log("Attempting silent sign-in after short delay...");
         const timerId = setTimeout(() => {
             if (tokenClient.current) {
               console.log("Setting silent sign-in flag and calling requestAccessToken with prompt: 'none'");
               isSilentSigninAttempt.current = true;
-              setIsLoading(true); // Set loading before the attempt
+              setIsLoading(true);
               tokenClient.current.requestAccessToken({ prompt: 'none' });
             } else { console.error("Token client not ready for silent sign-in attempt."); setIsLoading(false); }
         }, 100);
         return () => clearTimeout(timerId);
-    } else {
-        // If already signed in, ensure loading is false
-        // This might happen if explicit sign-in completed before this effect ran
-        setIsLoading(false);
-    }
-  }, [isGapiReady, isGisReady, error, isSignedIn]);
+    } else { setIsLoading(false); }
+  }, [isGapiReady, isGisReady, error, isSignedIn]); // Dependencies
 
-  // *** useEffect to fetch data when isSignedIn becomes true ***
-  useEffect(() => {
-      // Only run if signed in AND GAPI client is ready
-      if (isSignedIn && isGapiReady) {
-          console.log("isSignedIn is true and GAPI ready, fetching initial data...");
-          setIsLoading(true); // Set loading true when starting fetches
-          // Pass the current isSignedIn status explicitly to fetchTopics
-          Promise.allSettled([fetchUserProfile(), fetchTopics(true, true)]) // Pass true for initial load, true for signedInStatus
+  useEffect(() => { // Fetch initial data Effect
+      if (isSignedIn && isGapiReady && userSpreadsheetId) {
+          console.log("isSignedIn, GAPI ready, and Spreadsheet ID available. Fetching initial data...");
+          setIsLoading(true);
+          Promise.allSettled([fetchUserProfile(), fetchTopics(true, true)])
               .then((results) => {
                   console.log("Initial fetchUserProfile/fetchTopics settled:", results);
                   results.forEach((result, index) => {
-                      if (result.status === 'rejected') {
-                          console.error(`Initial fetch ${index === 0 ? 'profile' : 'topics'} failed:`, result.reason);
-                          // Error state should already be set by the fetch functions
-                      }
+                      if (result.status === 'rejected') { console.error(`Initial fetch ${index === 0 ? 'profile' : 'topics'} failed:`, result.reason); }
                   });
               })
               .finally(() => {
                   console.log("Setting main isLoading to false after initial fetches triggered by isSignedIn.");
-                  setIsLoading(false); // Set loading false AFTER fetches complete
+                  setIsLoading(false);
               });
-      } else if (!isSignedIn) {
-          // If signed out, ensure loading is false (might already be false, but good practice)
-          setIsLoading(false);
+      } else if (!isSignedIn || !userSpreadsheetId) {
+          if (!error?.startsWith("Configuration Error")) { setIsLoading(false); }
+          // Don't clear topics here if just spreadsheet ID is missing briefly
+          // setTopics([]);
+          // setEvents([]);
+          // setCurrentTopicHeaders([]);
+          // setSelectedTopic('');
       }
-      // This effect runs when isSignedIn or isGapiReady changes
-  }, [isSignedIn, isGapiReady, fetchUserProfile, fetchTopics]); // Dependencies
+  }, [isSignedIn, isGapiReady, userSpreadsheetId, fetchUserProfile, fetchTopics, error]); // Dependencies
 
+  useEffect(() => { // Fetch Events/Headers on Topic Change Effect
+    console.log(`Selected topic effect: selectedTopic=${selectedTopic}, isSignedIn=${isSignedIn}`);
+    if (selectedTopic && isSignedIn && userSpreadsheetId) {
+        fetchEvents(); fetchTopicHeaders(selectedTopic); setNewEventData({});
+    } else {
+        console.log("Clearing events list and headers.");
+        setEvents([]); setCurrentTopicHeaders([]); setNewEventData({});
+    }
+  }, [selectedTopic, isSignedIn, userSpreadsheetId, fetchEvents, fetchTopicHeaders]); // Dependencies
 
-  const fetchEvents = useCallback(async () => {
-    if (!SPREADSHEET_ID) { setError("Spreadsheet ID is missing."); return; }
-    console.log(`Attempting to fetch events for topic: ${selectedTopic}`);
-    if (!selectedTopic || !isSignedIn || !window.gapi?.client?.sheets) { console.log("Fetch events skipped."); setEvents([]); return; }
-    console.log(`Fetching events for topic: ${selectedTopic}`);
-    setIsFetchingEvents(true); setError(null);
-    try {
-      const range = `${selectedTopic}!A2:B`;
-      const response = await window.gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: range });
-      const values = response.result.values || [];
-      const loadedEvents = values.map((row, index) => ({ id: `${selectedTopic}-${index}`, timestamp: row[0] || '', description: row[1] || '', rowNum: index + 2 })).sort((a, b) => { const dateA = new Date(a.timestamp); const dateB = new Date(b.timestamp); if (isNaN(dateA)) return 1; if (isNaN(dateB)) return -1; return dateB - dateA; });
-      setEvents(loadedEvents);
-    } catch (err) {
-      console.error("Error fetching events:", err);
-       const errorMessage = err.result?.error?.message || '';
-       if (err.status === 400 && (errorMessage.includes('Unable to parse range') || errorMessage.includes('exceeds grid limits'))) { console.log(`Sheet "${selectedTopic}" is likely empty/new.`); setEvents([]); }
-       else { const errorMsg = `Error fetching events: ${errorMessage}`; setError(errorMsg); if (err.status === 401 || err.status === 403) { console.warn("Auth error fetching events.", err.status); setError("Auth error fetching events."); handleSignOutClick(); } else { console.warn("Non-auth/grid error fetching events.", err.status); } }
-    } finally { console.log("fetchEvents finished."); setIsFetchingEvents(false); }
-  }, [selectedTopic, isSignedIn, handleSignOutClick]);
-
-  const fetchTopicHeaders = useCallback(async (topicTitle) => {
-      if (!SPREADSHEET_ID) { setError("Spreadsheet ID is missing."); return; }
-      console.log(`Attempting to fetch headers for topic: ${topicTitle}`);
-      if (!topicTitle || !isSignedIn || !window.gapi?.client?.sheets) { console.log("Fetch headers skipped."); setCurrentTopicHeaders([]); return; }
-      console.log(`Fetching headers for topic: ${topicTitle}`);
-      setIsFetchingHeaders(true); setError(null);
-      try {
-          const range = `${topicTitle}!1:1`;
-          const response = await window.gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: range });
-          const headers = response.result.values?.[0] || [];
-          setCurrentTopicHeaders(headers);
-      } catch (err) {
-          console.error("Error fetching topic headers:", err); const errorMsg = `Error fetching headers: ${err.result?.error?.message || err.message}`; setError(errorMsg);
-          setCurrentTopicHeaders([]);
-          if (err.status === 401 || err.status === 403) { console.warn("Auth error fetching headers.", err.status); setError("Auth error fetching headers."); handleSignOutClick(); }
-          else { console.warn("Non-auth error fetching headers.", err.status); }
-      } finally { console.log("fetchTopicHeaders finished."); setIsFetchingHeaders(false); }
-  }, [isSignedIn, handleSignOutClick]);
-
-  useEffect(() => { // Effect for selectedTopic change
-    console.log(`Selected topic/signedIn effect: selectedTopic=${selectedTopic}, isSignedIn=${isSignedIn}`);
-    if (selectedTopic && isSignedIn) { fetchEvents(); fetchTopicHeaders(selectedTopic); setNewEventData({}); }
-    else { console.log("Clearing events list and headers."); setEvents([]); setCurrentTopicHeaders([]); setNewEventData({}); }
-  }, [selectedTopic, isSignedIn, fetchEvents, fetchTopicHeaders]);
-
-
-  // --- Action Handlers (Memoized) ---
-  const handleAuthClick = useCallback(() => {
-    if (error?.startsWith("Configuration Error")) return;
-    console.log("handleAuthClick called");
-    setError(null);
-    if (!tokenClient.current) { setError("Google Sign-In is not ready yet."); setIsLoading(false); return; }
-    console.log("Requesting token access via GIS (with consent prompt)..."); setIsLoading(true);
-    isSilentSigninAttempt.current = false;
-    tokenClient.current.requestAccessToken({ prompt: 'consent' });
-  }, [error]);
-
-  const handleAddTopic = useCallback(async (e) => {
-    e.preventDefault(); if (!SPREADSHEET_ID) { setError("Spreadsheet ID is missing."); return; }
-    console.log("handleAddTopic called");
-    const trimmedTopicName = newTopicName.trim(); const trimmedColumns = newTopicColumns.trim();
-    if (!trimmedTopicName || !isSignedIn || !window.gapi?.client?.sheets) { setError("Topic name cannot be empty, or not signed in/ready."); return; }
-    if (topics.some(topic => topic.title === trimmedTopicName)) { setError(`Topic "${trimmedTopicName}" already exists.`); return; }
-    const userColumns = trimmedColumns ? trimmedColumns.split(',').map(col => col.trim()).filter(Boolean) : ['Event Description'];
-    const finalHeaders = ["Timestamp", ...userColumns]; const columnCount = finalHeaders.length;
-    console.log(`Adding topic: ${trimmedTopicName} with columns: ${finalHeaders.join(', ')}`);
-    setIsLoading(true); setError(null); // Use main loading state for this action
-    try {
-      const addSheetRequest = { requests: [ { addSheet: { properties: { title: trimmedTopicName, gridProperties: { rowCount: 1, columnCount: columnCount } } } } ] };
-      const response = await window.gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, resource: addSheetRequest });
-      const newSheetProperties = response.result.replies?.[0]?.addSheet?.properties; const newSheetId = newSheetProperties?.sheetId;
-      if (!newSheetId && newSheetId !== 0) { throw new Error("Could not get sheetId for new sheet."); }
-      await window.gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEET_ID, range: `${trimmedTopicName}!A1`, valueInputOption: 'USER_ENTERED', resource: { values: [finalHeaders] } });
-      setNewTopicName(''); setNewTopicColumns('Event Description'); setShowAddTopic(false);
-      const newTopic = { title: trimmedTopicName, sheetId: newSheetId };
-      setTopics(prevTopics => [...prevTopics, newTopic]);
-      setSelectedTopic(trimmedTopicName);
-    } catch (err) {
-      console.error("Error adding topic:", err); const errorMsg = `Error adding topic: ${err.result?.error?.message || err.message}`; setError(errorMsg);
-      if (err.status === 401 || err.status === 403) { console.warn("Auth error adding topic.", err.status); setError("Auth error adding topic."); handleSignOutClick(); }
-      else { console.warn("Non-auth error adding topic.", err.status); }
-    } finally { console.log("handleAddTopic finished."); setIsLoading(false); } // Stop main loading
-  }, [newTopicName, newTopicColumns, isSignedIn, topics, handleSignOutClick]);
-
-  const handleAddEvent = useCallback(async (e) => {
-    e.preventDefault(); if (!SPREADSHEET_ID) { setError("Spreadsheet ID is missing."); return; }
-    console.log("handleAddEvent called");
-    if (currentTopicHeaders.length === 0) { setError("Topic headers not loaded."); return; }
-    const hasDynamicData = Object.values(newEventData).some(val => val && val.trim() !== '');
-    const isTimestampOnly = currentTopicHeaders.length === 1;
-    if (!isTimestampOnly && !hasDynamicData) { setError(`Please fill in at least one event detail.`); return; }
-    if (!selectedTopic || !isSignedIn || !window.gapi?.client?.sheets) { setError("Cannot add event: Not ready."); return; }
-    console.log(`Adding event to topic: ${selectedTopic}`);
-    setIsLoading(true); setError(null); // Use main loading state
-    try {
-      let timestamp = formatTimestamp(); const trimmedTime = newEventCustomTime.trim();
-      if (trimmedTime) {
-          if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmedTime)) { const parsedDate = new Date(trimmedTime); if (!isNaN(parsedDate.getTime())) { timestamp = formatTimestamp(parsedDate); } else { setError("Invalid custom date format."); setIsLoading(false); return; } }
-          else { setError("Invalid custom date format."); setIsLoading(false); return; }
-      }
-      const rowData = currentTopicHeaders.map((header, index) => (index === 0 ? timestamp : (newEventData[header] || '')));
-      const values = [rowData]; const body = { values: values };
-      await window.gapi.client.sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEET_ID, range: selectedTopic, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', resource: body });
-      setNewEventCustomTime(''); setNewEventData({}); setShowAddEvent(false);
-      await fetchEvents();
-    } catch (err) {
-      console.error("Error adding event:", err); const errorMsg = `Error adding event: ${err.result?.error?.message || err.message}`; setError(errorMsg);
-      if (err.status === 401 || err.status === 403) { console.warn("Auth error adding event.", err.status); setError("Auth error adding event."); handleSignOutClick(); }
-      else { console.warn("Non-auth error adding event.", err.status); }
-    } finally { console.log("handleAddEvent finished."); setIsLoading(false); } // Stop main loading
-  }, [selectedTopic, isSignedIn, newEventCustomTime, fetchEvents, handleSignOutClick, currentTopicHeaders, newEventData]);
-
-  const handleDeleteEvent = useCallback(async (eventToDelete, sheetId) => {
-      if (!SPREADSHEET_ID) { setError("Spreadsheet ID is missing."); return; }
-      if (!eventToDelete || sheetId === undefined || !isSignedIn || !window.gapi?.client?.sheets) { setError("Cannot delete event: missing data/state."); return; }
-      if (!window.confirm(`Delete event: "${eventToDelete.description}"?`)) { return; }
-      console.log(`Deleting row: ${eventToDelete.rowNum} from sheetId: ${sheetId}`);
-      setIsLoading(true); setError(null); // Use main loading state
-      try {
-          const deleteRequest = { requests: [ { deleteDimension: { range: { sheetId: sheetId, dimension: "ROWS", startIndex: eventToDelete.rowNum - 1, endIndex: eventToDelete.rowNum } } } ] };
-          await window.gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, resource: deleteRequest });
-          setEvents(prevEvents => prevEvents.filter(event => event.id !== eventToDelete.id));
-      } catch (err) {
-          console.error("Error deleting event:", err); const errorMsg = `Error deleting event: ${err.result?.error?.message || err.message}`; setError(errorMsg);
-          if (err.status === 401 || err.status === 403) { console.warn("Auth error deleting event.", err.status); setError("Auth error deleting event."); handleSignOutClick(); }
-          else { console.warn("Non-auth error deleting event.", err.status); }
-      } finally { console.log("handleDeleteEvent finished."); setIsLoading(false); } // Stop main loading
-  }, [isSignedIn, handleSignOutClick]); // Dependencies
-
-  const getCurrentSheetId = () => topics.find(t => t.title === selectedTopic)?.sheetId;
-
-  const handleNewEventDataChange = (header, value) => setNewEventData(prevData => ({ ...prevData, [header]: value }));
 
   // --- UI Rendering ---
-  // Use main isLoading for overall loading state, specific ones for targeted feedback
-  const showAppLoading = isLoading && !error; // Show main loader only if no error and isLoading is true
+  const showAppLoading = isLoading && !error;
+
+  if (error?.startsWith("Configuration Error")) {
+     return ( <div className="app-container"> <div className="content-wrapper"> <div className="error-box">{error}</div> </div> </div> );
+  }
 
   return (
     <div className="app-container">
@@ -452,12 +484,14 @@ function App() {
         {/* Header */}
         <header className="header"> <h1>Sheets Event Logger</h1> <div className="auth-controls"> {showAppLoading && <div className="loader">Loading...</div>} {isGapiReady && isGisReady && !isSignedIn && !showAppLoading && ( <button onClick={handleAuthClick} disabled={showAppLoading} className="button button-primary"> Sign In with Google </button> )} {isSignedIn && currentUser && ( <div className="user-info"> <span className="user-details">{currentUser.name} ({currentUser.email})</span> <button onClick={handleSignOutClick} className="button button-danger">Sign Out</button> </div> )} </div> </header>
         {/* Error Display */}
-        {error && ( <div className="error-box"> <strong>Error: </strong> <span>{error}</span> <button onClick={() => setError(null)} className="close-button">&times;</button> </div> )}
-        {/* Initializing Message - shown only if libs aren't ready AND not loading AND no error */}
-        {(!isGapiReady || !isGisReady) && !showAppLoading && !error && ( <p className="status-message">Initializing Google Services...</p> )}
+        {error && !error.startsWith("Configuration Error") && ( <div className="error-box"> <strong>Error: </strong> <span>{error}</span> <button onClick={() => setError(null)} className="close-button">&times;</button> </div> )}
+        {/* Spreadsheet ID Input Section */}
+        {isSignedIn && ( <section className="section spreadsheet-id-section"> {!showIdInput && userSpreadsheetId ? ( <div className="spreadsheet-id-display"> <span>Using Spreadsheet ID: <code>{userSpreadsheetId}</code></span> <button onClick={handleChangeSpreadsheetId} className="button button-secondary button-small">Change</button> </div> ) : ( <div className="form spreadsheet-id-form"> <label htmlFor="spreadsheet-id-input">Enter Google Spreadsheet ID:</label> <div className="form-row"> <input id="spreadsheet-id-input" type="text" value={spreadsheetIdInput} onChange={(e) => setSpreadsheetIdInput(e.target.value)} placeholder="Paste Spreadsheet ID here" className="input-field" disabled={isLoading} /> <button onClick={handleSaveSpreadsheetId} disabled={isLoading} className="button button-primary">Save ID</button> {userSpreadsheetId && <button type="button" onClick={() => { setShowIdInput(false); setSpreadsheetIdInput(userSpreadsheetId); setError(null); }} className="button button-secondary">Cancel</button>} </div> <p className="help-text">Find the ID in your spreadsheet's URL: .../spreadsheets/d/<b>SPREADSHEET_ID</b>/edit</p> </div> )} </section> )}
+        {/* Initializing Message */}
+        {(!isGapiReady || !isGisReady) && !error && !showAppLoading && ( <p className="status-message">Initializing Google Services...</p> )}
 
-        {/* Main Content Area (Signed In) */}
-        {isSignedIn && !showAppLoading && ( // Don't show main content if initial loading is happening
+        {/* Main Content Area */}
+        {isSignedIn && userSpreadsheetId && !showAppLoading && (
           <main>
             {/* Topic Section */}
             <section className="section">
@@ -478,10 +512,11 @@ function App() {
             )}
           </main>
         )}
-        {/* Sign In Prompt - shown only if libs are ready, not signed in, and not loading */}
-        {isGapiReady && isGisReady && !isSignedIn && !showAppLoading && ( <p className="status-message">Please sign in to manage your event logs.</p> )}
+        {/* Prompts based on state */}
+        {isSignedIn && !userSpreadsheetId && !showIdInput && !isLoading && ( <p className="status-message">Please configure a Spreadsheet ID to load data.</p> )}
+        {!isSignedIn && isGapiReady && isGisReady && !showAppLoading && ( <p className="status-message">Please sign in to manage your event logs.</p> )}
       </div>
-      <footer className="footer"> Ensure Client ID, API Key, and Spreadsheet ID are set in .env and server restarted. </footer>
+      <footer className="footer"> Ensure Client ID and API Key are set in .env and server restarted. </footer>
     </div>
   );
 }
