@@ -433,12 +433,21 @@ body {
   .header {
     /* Keep header row layout, but allow wrapping */
      justify-content: center; /* Center items when they wrap */
-  }
+     flex-wrap: wrap; /* Explicitly ensure wrap is active */
+    }
    .header h1 {
+     /* Reduce font size for mobile */
+     font-size: 1.8em; /* Significantly smaller, adjust if needed */
+
+     /* Remove width: 100% to allow natural sizing based on content */
+     /* width: 100%; */ /* Removed/Commented out */
+
      justify-content: center; /* Ensure title stays centered */
      text-align: center; /* Center text if it wraps */
-     width: 100%; /* Allow title to take full width if needed */
      order: 1; /* Ensure title comes first visually */
+
+     /* Prevent shrinking if space gets very tight */
+     flex-shrink: 0;
    }
    .auth-controls {
      order: 2; /* Ensure auth controls come after title */
