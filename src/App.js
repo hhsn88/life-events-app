@@ -1067,11 +1067,6 @@ function App() {
           <p className="status-message">Please sign in to manage your event logs.</p>
         )}
       </div>
-
-      {/* Footer */}
-      <footer className="footer">
-        Ensure Client ID is set in .env and server restarted if issues persist.
-      </footer>
     </div>
   );
 }
